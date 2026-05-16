@@ -1,69 +1,60 @@
 import os
-import logging
+import asyncio
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
-from http.server import SimpleHTTPRequestHandler
-from socketserver import TCPServer
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
+from google.genai import types
 
-# إعداد السجلات لمراقبة الأخطاء
-logging.basicConfig(format='%(asctime)s - %(name)s - %(message)s', level=logging.INFO)
+# 1. إعداد السيرفر الوهمي لمنصة Render
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is running smoothly.")
 
-# دالة لتشغيل سيرفر وهمي في الخلفية لإرضاء منصة Hugging Face ومنع إغلاق البوت
 def run_dummy_server():
-    class Handler(SimpleHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"SB Agent is Online and Running!")
-            
-    try:
-        with TCPServer(("0.0.0.0", 7860), Handler) as httpd:
-            logging.info("Dummy server started on port 7860")
-            httpd.serve_forever()
-    except Exception as e:
-        logging.error(f"Server error: {e}")
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), DummyHandler)
+    server.serve_forever()
 
-# تشغيل السيرفر الوهمي في مسار منفصل (Thread) قبل بدء البوت
-threading.Thread(target=run_dummy_server, daemon=True).start()
+# 2. جلب المتغيرات السرية
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-# إعداد عميل جيميناي بالمكتبة الحديثة لعام 2026
-# تقرأ المكتبة تلقائياً المفتاح المسمى GEMINI_API_KEY من إعدادات الـ Secrets
-client = genai.Client()
+# 3. إعداد عميل جيميناي بالصيغة الصحيحة للمكتبة الجديدة
+ai_client = genai.Client(api_key=GEMINI_KEY)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("أهلاً بك! أنا جاهز ومستقر الآن على السيرفر الجديد. كيف يمكنني مساعدتك؟")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
-    chat_id = update.message.chat_id
-    
-    # إرسال حركة "جاري الكتابة..." في تليجرام
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-    
     try:
-        # صياغة التوجيه للوكيل
-        prompt = f"أنت وكيل ذكاء اصطناعي خبير تقني ومبرمج محترف. اسمك SB Agent. أجب دائماً باللغة العربية بوضوح واختصار مفيد. المستخدم يطلب منك: {user_text}"
-        
-        # استدعاء النموذج الحديث
-        response = client.models.generate_content(
-            model='gemini-1.5-pro',
-            contents=prompt,
+        # استخدام النموذج الموصى به وبصيغة متوافقة مباشرة
+        response = ai_client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=user_text
         )
-        
-        # الرد على المستخدم
         await update.message.reply_text(response.text)
-
     except Exception as e:
-        logging.error(f"Error while generating content: {e}")
-        await update.message.reply_text(f"عذراً، واجهت مشكلة في معالجة طلبك: {str(e)}")
+        await update.message.reply_text(f"حدث خطأ أثناء معالجة الذكاء الاصطناعي: {str(e)}")
 
-if __name__ == '__main__':
-    # الحصول على التوكن وتشغيل البوت
-    token = os.getenv("TELEGRAM_TOKEN")
-    if not token:
-        logging.error("TELEGRAM_TOKEN is missing!")
-    else:
-        application = ApplicationBuilder().token(token).build()
-        application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-        
-        logging.info("Starting Telegram Bot application...")
-        application.run_polling()
+def main():
+    # تشغيل السيرفر الوهمي في خلفية النظام
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+
+    # بناء تطبيق تليجرام
+    application = Application.builder().token(TOKEN).build()
+
+    # إضافة المعالجات
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # بدء الاستماع للرسائل
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
