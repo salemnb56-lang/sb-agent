@@ -149,12 +149,28 @@ model = genai.GenerativeModel(
 # --- معالجة الردود المتقدمة ومؤشرات تليجرام ---
 
 async def send_smart_response(update: Update, context: ContextTypes.DEFAULT_TYPE, text_response: str):
-    """ Sends text and automatically converts short responses into high-quality Arabic voice. """
+    """ Sends formatted text and automatically converts short responses into high-quality Arabic voice. """
     if not text_response:
         return
         
-    # إرسال الرد النصي الأساسي أولاً
-    await update.message.reply_text(text_response)
+    # --- معالجة وتنسيق النص ليتوافق مع تليجرام ---
+    # تحويل العناوين (## و ###) إلى نصوص عريضة، وتحويل رموز الغامق القياسية لتعمل في تليجرام
+    lines = text_response.split('\n')
+    for i, line in enumerate(lines):
+        if line.startswith('#'):
+            cleaned_line = line.lstrip('#').strip().replace("**", "")
+            lines[i] = f"*{cleaned_line}*"
+            
+    formatted_text = '\n'.join(lines)
+    # جيميناي يرسل الغامق كـ ** وتليجرام ماركداون الإصدار الأول يفهمه كـ *
+    formatted_text = formatted_text.replace("**", "*")
+    
+    # إرسال الرد النصي المنسق مع تجنب توقف البوت في حال حدوث خطأ نادر في التنسيق
+    try:
+        await update.message.reply_text(formatted_text, parse_mode=constants.ParseMode.MARKDOWN)
+    except Exception as e:
+        # خطة بديلة: إرسال النص بدون تنسيق في حال فشل الماركداون لضمان استمرار الخدمة
+        await update.message.reply_text(text_response)
     
     # إذا كان النص قصيراً ومختصراً، يتم توليد ملف صوتي ذكي فوراً وبشكل صامت
     if len(text_response) < 450:
@@ -162,7 +178,7 @@ async def send_smart_response(update: Update, context: ContextTypes.DEFAULT_TYPE
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.RECORD_AUDIO)
             audio_file_path = f"agent_voice_{update.effective_user.id}.mp3"
             
-            # استخدام الصوت العصبي الفصيح من مايكروسوفت إيدج
+            # استخدام الصوت العصبي الفصيح من مايكروسوفت إيدج (يتم إرسال النص الخام بدون رموز الماركداون للصوت)
             communicate = edge_tts.Communicate(text_response, "ar-SA-HamedNeural")
             await communicate.save(audio_file_path)
             
