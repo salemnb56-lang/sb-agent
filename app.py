@@ -142,7 +142,7 @@ def get_current_datetime() -> str:
 
 # بناء نموذج جيميناي وربط كافة الأدوات المعرفّة أعلاه به تلقائياً
 model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash',
+    model_name='gemini-2.5-flash',
     tools=[execute_code, get_weather, google_apps_script_action, search_duckduckgo, lookup_ip, encrypt_decrypt_text, get_current_datetime]
 )
 
