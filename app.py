@@ -28,7 +28,6 @@ def format_to_telegram_html(text: str) -> str:
     if not text:
         return ""
     
-    # استخدام التشفير الرقمي لتوليد علامات (```) لتجنب تكسير الأسطر في GitHub
     b_ticks = chr(96) * 3
     split_pattern = r'(' + b_ticks + r'[\s\S]*?' + b_ticks + r')'
     code_pattern = b_ticks + r'(?:[a-zA-Z0-9_-]+)?\n([\s\S]*?)\n' + b_ticks
@@ -79,7 +78,7 @@ def calendar_list_events(start_time: str, end_time: str) -> str:
 def execute_code(code: str, language: str = "python") -> str:
     try:
         payload = {"language": language, "version": "*", "files": [{"content": code}]}
-        res = requests.post("[https://emkc.org/api/v2/piston/execute](https://emkc.org/api/v2/piston/execute)", json=payload, timeout=12)
+        res = requests.post("https://emkc.org/api/v2/piston/execute", json=payload, timeout=12)
         if res.status_code == 200:
             out = res.json().get("run", {}).get("output", "")
             return out if out else "نُفذ بنجاح دون مخرجات."
@@ -88,7 +87,7 @@ def execute_code(code: str, language: str = "python") -> str:
 
 def search_duckduckgo(query: str) -> str:
     try:
-        res = requests.get(f"[https://html.duckduckgo.com/html/?q=](https://html.duckduckgo.com/html/?q=){query}", headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+        res = requests.get(f"https://html.duckduckgo.com/html/?q={query}", headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, "html.parser")
             snippets = [a.get_text(strip=True) for a in soup.find_all('a', class_='result__snippet')[:4]]
@@ -100,7 +99,7 @@ def get_weather(city: str) -> str:
     api_key = os.environ.get("OPENWEATHER_API_KEY")
     if not api_key: return "مفتاح الطقس مفقود."
     try:
-        res = requests.get(f"[http://api.openweathermap.org/data/2.5/weather?q=](http://api.openweathermap.org/data/2.5/weather?q=){city}&appid={api_key}&units=metric&lang=ar", timeout=6)
+        res = requests.get(f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric&lang=ar", timeout=6)
         if res.status_code == 200:
             d = res.json()
             return f"الطقس في {city}: {d['weather'][0]['description']}، حرارة: {d['main']['temp']}°م."
@@ -109,7 +108,7 @@ def get_weather(city: str) -> str:
 
 def lookup_ip(ip: str) -> str:
     try:
-        res = requests.get(f"[http://ip-api.com/json/](http://ip-api.com/json/){ip}", timeout=6)
+        res = requests.get(f"http://ip-api.com/json/{ip}", timeout=6)
         if res.status_code == 200 and res.json().get("status") == "success":
             d = res.json()
             return f"الدولة: {d.get('country')}، المدينة: {d.get('city')}، المزود: {d.get('isp')}."
@@ -200,7 +199,6 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_render_health_check(reader, writer):
     try:
         await reader.read(1024)
-        body = b"OK"
         writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
         await writer.drain()
     except Exception: pass
@@ -212,7 +210,7 @@ async def main():
     
     app = Application.builder().token(os.environ.get("TELEGRAM_TOKEN")).build()
     app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(filters.TEXT & ~filters.COMMAND, text_handler)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     
     await app.initialize()
