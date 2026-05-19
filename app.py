@@ -4,8 +4,6 @@ import json
 import html
 import re
 import asyncio
-import threading
-import http.server
 import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
@@ -24,7 +22,7 @@ USER_CHATS = {}
 def check_user_authority(user_id: int) -> bool:
     """ تضمن هذه الدالة ألا يستجيب البوت نهائياً لأي طلبات خارجية ما لم تطابق هوية المالك """
     if not ALLOWED_USER:
-        return True  # إذا لم يتم تعيين المتغير في ريندر يظل مفتوحاً مؤقتاً
+        return True
     return str(user_id) == str(ALLOWED_USER)
 
 # --- نظام معالجة وتنسيق النصوص البرمجية المتطور ---
@@ -33,16 +31,10 @@ def format_to_telegram_html(text: str) -> str:
     if not text:
         return ""
     
-    # فصل الكتل البرمجية لحمايتها من التلف أثناء عملية التحويل التلقائي
     parts = re.split(r'(```[\s\S]*?```)', text)
     for i in range(len(parts)):
         if parts[i].startswith('```'):
-            # تم فصل النمط البرمجي في متغير مستقل لحمايته من الانقطاع أثناء اللصق
             code_pattern = r'
 http://googleusercontent.com/immersive_entry_chip/0
 
-### الخطوة التالية:
-1. استبدل الدالة في ملف `app.py` على GitHub واحفظ الملف (Commit).
-2. سيقوم سيرفر Render ببدء البناء تلقائياً بناءً على التحديث الجديد.
-3. انتظر دقيقتين وستختفي الرسالة الحمراء ويتحول السيرفر إلى الحالة الخضراء الاسترجاعية المستقرة.
-بمجرد الانتهاء من تحديث كود جوجل اسكربت وحفظ ملف `app.py` في مستودع GitHub، سيقوم سيرفر Render تلقائياً بإعادة تشغيل النظام وهيكلة الصلاحيات الجديدة، وحينها يمكنك أن تطلب منه مباشرة تصفية، تصنيف، وقراءة أي محتوى بريدي أو جدولة مواعيدك الشخصية بشكل مباشر وآمن تماماً.
+احفظ هذا الكود في GitHub وتلقائياً سيبدأ سيرفر Render بالبناء الجديد، وستلاحظ اختفاء خطأ المنفذ تماماً واستقرار الخدمة باللون الأخضر.
