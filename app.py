@@ -139,18 +139,24 @@ model = genai.GenerativeModel(
     ]
 )
 
-# --- نظام الاستجابة والصوت ---
+# --- محرك التوصيل الذكي وتجزئة النصوص ---
 async def process_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_response: str):
     if not raw_response: return
-    html_formatted = format_to_telegram_html(raw_response)
-    try:
-        await update.message.reply_text(html_formatted, parse_mode=constants.ParseMode.HTML)
-    except Exception:
-        await update.message.reply_text(raw_response)
+    
+    # تجزئة النصوص تلقائياً لحل مشكلة الرسائل الطويلة جداً
+    max_chunk_size = 3500
+    chunks = [raw_response[i:i+max_chunk_size] for i in range(0, len(raw_response), max_chunk_size)]
+    
+    for chunk in chunks:
+        html_formatted = format_to_telegram_html(chunk)
+        try:
+            await update.message.reply_text(html_formatted, parse_mode=constants.ParseMode.HTML)
+        except Exception:
+            await update.message.reply_text(chunk)
+        await asyncio.sleep(0.5) # مهلة زمنية قصيرة لمنع تداخل الرسائل المتتالية
         
     if len(raw_response) < 450:
         try:
-            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.RECORD_AUDIO)
             audio_path = f"audio_{update.effective_user.id}.mp3"
             communicate = edge_tts.Communicate(raw_response, "ar-SA-HamedNeural")
             await communicate.save(audio_path)
@@ -160,40 +166,67 @@ async def process_and_send_response(update: Update, context: ContextTypes.DEFAUL
                 os.remove(audio_path)
         except Exception: pass
 
-# --- المعالجات ---
+# --- وظيفة إبقاء مؤشر الكتابة حياً ---
+async def keep_typing_indicator(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    try:
+        while True:
+            await context.bot.send_chat_action(chat_id=chat_id, action=constants.ChatAction.TYPING)
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
+
+# --- المعالجات المحدثة بأنظمة العزل الفراغي ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_user_authority(update.effective_user.id): return
     USER_CHATS[update.effective_user.id] = model.start_chat(enable_automatic_function_calling=True)
-    await update.message.reply_text("النظام جاهز.")
+    await update.message.reply_text("النظام جاهز ومحمي كلياً.")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_user_authority(update.effective_user.id): return
     user_id = update.effective_user.id
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
+    chat_id = update.effective_chat.id
+    
     if user_id not in USER_CHATS:
         USER_CHATS[user_id] = model.start_chat(enable_automatic_function_calling=True)
+        
+    # تشغيل مؤشر الكتابة المستمر في الخلفية
+    typing_task = asyncio.create_task(keep_typing_indicator(context, chat_id))
     try:
-        response = USER_CHATS[user_id].send_message(update.message.text)
+        # عزل المعالجة في خيط منفصل تماماً لمنع تجميد السيرفر وحفظ استقرار المنفذ
+        response = await asyncio.to_thread(USER_CHATS[user_id].send_message, update.message.text)
+        typing_task.cancel() # إيقاف المؤشر فور نضوج الرد
         await process_and_send_response(update, context, response.text)
     except Exception as e:
+        typing_task.cancel()
         await update.message.reply_text(f"خطأ تنفيذي: {str(e)}")
 
 async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_user_authority(update.effective_user.id): return
     user_id = update.effective_user.id
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.RECORD_AUDIO)
+    chat_id = update.effective_chat.id
+    
     local_path = f"voice_{user_id}.ogg"
+    typing_task = asyncio.create_task(keep_typing_indicator(context, chat_id))
     try:
         tg_file = await context.bot.get_file(update.message.voice.file_id)
         await tg_file.download_to_drive(local_path)
-        uploaded_media = genai.upload_file(local_path, mime_type="audio/ogg")
+        
+        uploaded_media = await asyncio.to_thread(genai.upload_file, local_path, mime_type="audio/ogg")
+        
         if user_id not in USER_CHATS:
             USER_CHATS[user_id] = model.start_chat(enable_automatic_function_calling=True)
-        response = USER_CHATS[user_id].send_message([uploaded_media, "نفذ المطلوب."])
+            
+        response = await asyncio.to_thread(
+            USER_CHATS[user_id].send_message, 
+            [uploaded_media, "نفذ المطلوب بدقة."]
+        )
+        typing_task.cancel()
         if os.path.exists(local_path): os.remove(local_path)
         await process_and_send_response(update, context, response.text)
     except Exception as e:
-        await update.message.reply_text(f"خطأ صوتي: {str(e)}")
+        typing_task.cancel()
+        if os.path.exists(local_path): os.remove(local_path)
+        await update.message.reply_text(f"خطأ صوتي تنفيذي: {str(e)}")
 
 # --- خادم الفحص الخاص بمنصة Render ---
 async def handle_render_health_check(reader, writer):
