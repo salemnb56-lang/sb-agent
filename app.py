@@ -10,8 +10,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 import google.generativeai as genai
-import edge_tts
-from telegram import Update, constants, InputFile
+from telegram import Update, constants
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -44,7 +43,7 @@ def format_to_telegram_html(text: str) -> str:
     return ''.join(parts)
 
 # ==========================================
-# الأدوات الأساسية والسابقة (أدوات النظام والويب)
+# 1. أدوات النظام والويب والبحث
 # ==========================================
 def execute_code(code: str, language: str = "python") -> str:
     try:
@@ -65,7 +64,7 @@ def get_webpage_content(url: str) -> str:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
         text = soup.get_text(separator='\n', strip=True)
-        return text[:15000] + "\n...[تم قص النص لحماية الذاكرة]" if len(text) > 15000 else text
+        return text[:15000] + "\n...[تم قص النص]" if len(text) > 15000 else text
     except Exception as e: return f"فشل قراءة الرابط: {str(e)}"
 
 def get_global_news(topic: str) -> str:
@@ -74,47 +73,37 @@ def get_global_news(topic: str) -> str:
         res = requests.get(url, timeout=8)
         root = ET.fromstring(res.content)
         news = [f"- {item.find('title').text}\n  الرابط: {item.find('link').text}" for item in root.findall('./channel/item')[:6]]
-        return "\n\n".join(news) if news else "لم أجد أخباراً حديثة."
+        return "\n\n".join(news) if news else "لم أجد أخباراً."
     except Exception as e: return f"خطأ: {str(e)}"
 
 def generate_image(prompt: str) -> str:
     encoded_prompt = requests.utils.quote(prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
-    return f"IMAGE_URL:{url}"
+    return f"IMAGE_URL:https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
 
 def inspect_archive_or_apk(file_path: str) -> str:
     try:
-        if not zipfile.is_zipfile(file_path): return "الملف ليس أرشيفاً مدعوماً."
+        if not zipfile.is_zipfile(file_path): return "الملف ليس أرشيفاً."
         with zipfile.ZipFile(file_path, 'r') as z:
             files = z.namelist()
             manifest = "موجود" if "AndroidManifest.xml" in files else "غير موجود"
-            return f"التحليل:\nالملفات: {len(files)}\nبيانات AndroidManifest: {manifest}\nعينة:\n" + "\n".join(files[:20])
+            return f"الملفات: {len(files)}\nAndroidManifest: {manifest}\nعينة:\n" + "\n".join(files[:20])
     except Exception as e: return f"خطأ: {str(e)}"
 
 def get_current_datetime() -> str:
     import datetime
-    return f"توقيت السيرفر الحالي: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    return f"توقيت السيرفر: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-# ==========================================
-# أداة جديدة: بناء المشاريع وضغطها (للكوتلين والويب)
-# ==========================================
 def create_project_zip(files_dict: dict, project_name: str = "project") -> str:
-    """
-    تقوم هذه الأداة بإنشاء ملف ZIP يحتوي على مجلدات وملفات المشروع المطلوبة (مثل تطبيق أندرويد أو موقع ويب).
-    files_dict: قاموس يحتوي على مسار الملف كـ Key ومحتوى الملف كـ Value.
-    مثال: {"app/src/main/AndroidManifest.xml": "<manifest>...", "build.yml": "name: CI..."}
-    """
     try:
         zip_filename = f"{project_name}.zip"
         with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for filepath, content in files_dict.items():
                 zipf.writestr(filepath, content)
         return f"PROJECT_ZIP_CREATED:{zip_filename}"
-    except Exception as e:
-        return f"فشل إنشاء المشروع: {str(e)}"
+    except Exception as e: return f"فشل إنشاء المشروع: {str(e)}"
 
 # ==========================================
-# أدوات Google Apps Script الشاملة
+# 2. أدوات بوابات جوجل (Apps Script)
 # ==========================================
 def google_apps_script_core(action: str, payload: dict) -> str:
     url = os.environ.get("GOOGLE_SCRIPT_URL")
@@ -124,38 +113,27 @@ def google_apps_script_core(action: str, payload: dict) -> str:
         return res.text if res.status_code == 200 else f"خطأ البوابة: {res.status_code}"
     except Exception as e: return f"فشل الاتصال: {str(e)}"
 
-# أدوات Gmail والتقويم (القديمة)
 def gmail_search_emails(query: str, limit: int = 5) -> str: return google_apps_script_core("gmail_search", {"query": query, "limit": limit})
 def gmail_send_email(to: str, subject: str, body: str) -> str: return google_apps_script_core("gmail_send", {"to": to, "subject": subject, "body": body})
 def gmail_draft_email(to: str, subject: str, body: str) -> str: return google_apps_script_core("gmail_draft", {"to": to, "subject": subject, "body": body})
 def calendar_add_event(title: str, start_time: str, end_time: str, description: str = "") -> str: return google_apps_script_core("calendar_create", {"title": title, "start_time": start_time, "end_time": end_time, "description": description})
-
-# أدوات Google Drive & Docs & Sheets (الجديدة)
-def drive_search_files(query: str) -> str: 
-    """البحث عن ملفات في جوجل درايف"""
-    return google_apps_script_core("drive_search", {"query": query})
-def drive_create_folder(folder_name: str) -> str: 
-    """إنشاء مجلد جديد في جوجل درايف"""
-    return google_apps_script_core("drive_create_folder", {"folder_name": folder_name})
-def docs_create_document(title: str, content: str) -> str: 
-    """إنشاء مستند جوجل (Google Docs) جديد وكتابة محتوى فيه"""
-    return google_apps_script_core("docs_create", {"title": title, "content": content})
-def sheets_create_spreadsheet(title: str) -> str: 
-    """إنشاء جدول بيانات (Google Sheets) جديد"""
-    return google_apps_script_core("sheets_create", {"title": title})
-def sheets_append_row(sheet_id: str, row_data: list) -> str: 
-    """إضافة صف من البيانات إلى جدول جوجل شيتس (يجب توفير ID الجدول)"""
-    return google_apps_script_core("sheets_append", {"sheet_id": sheet_id, "row_data": row_data})
+def drive_search_files(query: str) -> str: return google_apps_script_core("drive_search", {"query": query})
+def drive_create_folder(folder_name: str) -> str: return google_apps_script_core("drive_create_folder", {"folder_name": folder_name})
+def docs_create_document(title: str, content: str) -> str: return google_apps_script_core("docs_create", {"title": title, "content": content})
+def sheets_create_spreadsheet(title: str) -> str: return google_apps_script_core("sheets_create", {"title": title})
+def sheets_append_row(sheet_id: str, row_data: list) -> str: return google_apps_script_core("sheets_append", {"sheet_id": sheet_id, "row_data": row_data})
 
 # ==========================================
-# إعداد الذكاء الاصطناعي والشخصية
+# 3. العقل المدبر والتعليمات الصارمة (Agent Core)
 # ==========================================
-SYSTEM_INSTRUCTION = """أنت السكرتير التنفيذي والوكيل الذكي فائق القدرات لمديرك 'سالم'.
-صلاحياتك وقوانينك:
-1. تملك أدوات تحكم بكامل منظومة Google (Gmail, Calendar, Drive, Docs, Sheets)، استخدمها بذكاء.
-2. تملك القدرة على بناء المشاريع (مواقع، تطبيقات Kotlin، ملفات GitHub Actions YAML). لإنشاء مشروع متكامل وإرساله كملف مضغوط للمدير، استخدم أداة `create_project_zip` وضع فيها هيكل المجلدات والأكواد الدقيقة.
-3. تحدث دائماً باللغة العربية الفصحى، بأسلوب عملي، تقني، مباشر، ومحترف.
-4. استخدم generate_image لتوليد الصور إن طلب منك ذلك."""
+SYSTEM_INSTRUCTION = """أنت وكيل ذكاء اصطناعي (AI Agent) تنفيذي ومبرمج محترف، لست مجرد روبوت دردشة. 
+مديرك يعتمد عليك لإنجاز مهام معقدة، ويجب أن تعمل وفق بروتوكول صارم:
+
+1. قانون حظر الهلوسة: يُمنع منعاً باتاً اختلاق معلومات، أسماء شركات، أو استخدام نصوص توضيحية (مثل Lorem Ipsum). إذا طلب منك معلومات عن مشروع حقيقي، يجب أن تستخدم أداة `search_duckduckgo` للبحث، ثم `get_webpage_content` لقرائة التفاصيل واستخراج بيانات حقيقية 100%. إذا لم تجد، أخبر المدير أنك لم تجد بدلاً من اختلاق الأكاذيب.
+2. الشفافية والتخطيط (Agentic Workflow): عند تلقي طلب ضخم، لا تعطِ النتيجة مباشرة. اكتب للمدير أولاً رسالة توضح فيها خطتك (مثال: "سأقوم أولاً بالبحث عن المحل.. ثم سأقرأ موقعه.. ثم سأبني الكود"). شارك المدير بتفكيرك.
+3. إنشاء المشاريع: إذا قمت ببناء موقع أو تطبيق، يجب عليك إلزامياً استدعاء أداة `create_project_zip` وتمرير الأكواد لها لتكوين ملف حقيقي. مجرد كتابة "تم إنشاء الملف" دون استخدام الأداة يُعتبر فشلاً ذريعاً.
+4. الذكاء في الأخطاء: إذا فشلت أداة، قم بتحليل الخطأ وجرب طريقة أخرى للبحث أو التنفيذ قبل الاستسلام.
+5. تحدث دائماً باحترافية، بأسلوب مباشر، وباللغة العربية الفصحى."""
 
 ALL_TOOLS = [
     execute_code, search_duckduckgo, get_webpage_content, get_global_news, generate_image, inspect_archive_or_apk,
@@ -167,34 +145,33 @@ ALL_TOOLS = [
 model = genai.GenerativeModel(model_name='gemini-2.5-flash', tools=ALL_TOOLS, system_instruction=SYSTEM_INSTRUCTION)
 
 # ==========================================
-# معالجة الردود الشاملة (صور، نصوص، ملفات مضغوطة)
+# 4. معالجة الردود وإدارة المحادثة (مع الحماية من التعليق)
 # ==========================================
 async def process_and_send_response(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_response: str):
     if not raw_response: return
     
-    # معالجة توليد الصور
+    # معالجة الصور
     if "IMAGE_URL:" in raw_response:
         url = raw_response.split("IMAGE_URL:")[-1].strip()
         try:
-            await update.message.reply_photo(photo=url, caption="⚡ تم توليد الصورة بنجاح:")
-            return
+            await update.message.reply_photo(photo=url, caption="⚡ تم توليد الصورة.")
         except Exception as e: logging.error(f"خطأ الصورة: {e}")
+        raw_response = re.sub(r'IMAGE_URL:.*', '', raw_response)
 
-    # معالجة تصدير المشاريع كـ ZIP
+    # معالجة الملفات المضغوطة (ZIP)
     if "PROJECT_ZIP_CREATED:" in raw_response:
         match = re.search(r"PROJECT_ZIP_CREATED:(.*?\.zip)", raw_response)
         if match:
             zip_filename = match.group(1).strip()
             if os.path.exists(zip_filename):
                 try:
-                    await update.message.reply_document(document=open(zip_filename, 'rb'), caption="📦 تم بناء المشروع وهيكلته بالكامل كما طلبت. يمكنك رفعه لـ GitHub الآن.")
+                    await update.message.reply_document(document=open(zip_filename, 'rb'), caption="📦 مشروعك جاهز بالكامل.")
                     os.remove(zip_filename)
-                    return
-                except Exception as e: logging.error(f"خطأ إرسال ZIP: {e}")
-            
-    # إرسال النصوص الطويلة
-    cleaned_text = re.sub(r'IMAGE_URL:.*', '', raw_response).strip()
-    cleaned_text = re.sub(r'PROJECT_ZIP_CREATED:.*', '', cleaned_text).strip()
+                except Exception as e: logging.error(f"خطأ ZIP: {e}")
+        raw_response = re.sub(r'PROJECT_ZIP_CREATED:.*', '', raw_response)
+
+    # إرسال النص المتبقي
+    cleaned_text = raw_response.strip()
     if not cleaned_text: return
 
     chunks = [cleaned_text[i:i+3500] for i in range(0, len(cleaned_text), 3500)]
@@ -213,12 +190,18 @@ async def keep_typing_loop(context: ContextTypes.DEFAULT_TYPE, chat_id: int, sto
     except asyncio.CancelledError: pass
 
 # ==========================================
-# مستقبلات الأوامر والوسائط
+# 5. أوامر التحكم (Start / Reset / Text)
 # ==========================================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_user_authority(update.effective_user.id): return
     USER_CHATS[update.effective_user.id] = model.start_chat(enable_automatic_function_calling=True)
-    await update.message.reply_text("مرحباً بك يا مدير سالم. جميع بوابات جوجل والمطورين مفعلة، وأداة تصدير المشاريع تعمل بكفاءة.")
+    await update.message.reply_text("مرحباً بك يا مدير. نظام الوكيل الذكي (Agent) يعمل بكامل أدواته. تم تفعيل بروتوكول التخطيط والبحث الحقيقي.")
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أمر جديد لإعادة تهيئة المحادثة في حال صمت البوت أو تعليقه"""
+    if not check_user_authority(update.effective_user.id): return
+    USER_CHATS[update.effective_user.id] = model.start_chat(enable_automatic_function_calling=True)
+    await update.message.reply_text("🔄 تم مسح الذاكرة المؤقتة وإعادة ضبط العقل المدبر. أنا مستعد لتلقي الأوامر من الصفر.")
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_user_authority(update.effective_user.id): return
@@ -229,6 +212,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     typing_task = asyncio.create_task(keep_typing_loop(context, update.effective_chat.id, stop_typing))
     
     try:
+        # هنا نقطة الاتصال مع Gemini، مضاف إليها حماية من التعليق
         response = await asyncio.to_thread(USER_CHATS[user_id].send_message, update.message.text)
         stop_typing.set()
         typing_task.cancel()
@@ -236,7 +220,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         stop_typing.set()
         typing_task.cancel()
-        await update.message.reply_text(f"⚙️ خطأ: {str(e)}")
+        # إذا حدث خطأ، نخبر المدير وننصحه باستخدام أمر إعادة الضبط
+        await update.message.reply_text(f"⚠️ واجهت عطلاً داخلياً أثناء التفكير: {str(e)}\n\n💡 نصيحة: إذا تكرر هذا الخطأ أو توقفت عن الرد، أرسل أمر /reset لتنظيف ذاكرتي المزدحمة.")
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not check_user_authority(update.effective_user.id): return
@@ -270,6 +255,9 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.delete()
             res = await asyncio.to_thread(USER_CHATS[user_id].send_message, [uploaded_media, update.message.caption or "حلل هذا."])
             await process_and_send_response(update, context, res.text)
+    except Exception as e:
+        await status_msg.delete()
+        await update.message.reply_text(f"⚠️ خطأ أثناء معالجة الملف: {str(e)}")
     finally:
         if os.path.exists(local_path): os.remove(local_path)
 
@@ -288,6 +276,9 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         res = await asyncio.to_thread(USER_CHATS[user_id].send_message, [uploaded_media, update.message.caption or "حلل الصورة."])
         await status_msg.delete()
         await process_and_send_response(update, context, res.text)
+    except Exception as e:
+        await status_msg.delete()
+        await update.message.reply_text(f"⚠️ خطأ في معالجة الصورة: {str(e)}")
     finally:
         if os.path.exists(local_path): os.remove(local_path)
 
@@ -305,6 +296,7 @@ async def main():
     app = Application.builder().token(os.environ.get("TELEGRAM_TOKEN")).build()
     
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("reset", reset_command)) # الأمر الجديد لحل التعليق
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
